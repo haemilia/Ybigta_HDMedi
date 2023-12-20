@@ -5,16 +5,6 @@ import argparse
 import os
 from pathlib import Path
 
-default_keywords = {
-    "forbid": ["투여하지 말 것", "경고", "금기사항", "복용하지 말 것", "복용하지 마십시오", "복용(사용)하지 말 것", "투여하지 마십시오", "하지 말 것", "즉각 중지", "중지"],
-    "warning": ["신중히 투여할 것", "주의사항", "주의", "신중하게 투여할 것", "신중투여 할 것", "와 상의할 것", "주의할 사항"],
-    "child": ['소아', '아이', '[0-9]+세 이하', '영유아', '신생아', '유아', '어린이', '미취학 아동', '학령기 아동', 
-            '첫해', '개월령', '생후 [0-9]+개월', '생후 [0-9]+일', '초등학생', '유치원생', 
-            '청소년', '학령 전 아동', '청소년기', '사춘기', '성장기', '영아'],
-    "pregnant": ["임신중의","수유중의","임부","임신하고 있을 가능성","수유부","모유","여성","가임기",],
-    "elderly": ['고령자', '[0-9]+세 이상']
-}
-
 def split_sections(text:str) -> dict:
     """
     Description: Transforms medicine guidelines and precautions text data into dictionary that retains the original text's hierarchy.
@@ -125,12 +115,7 @@ def tag_topic(content: str, topic_keywords: list, assign_category: int) -> int:
         return None
     
 
-def make_df(medicine_dictionary: dict, 
-            forbid_keywords:list = default_keywords['forbid'], 
-            warning_keywords:list = default_keywords['warning'], 
-            child_keywords:list = default_keywords['child'],
-            pregnancy_keywords:list = default_keywords['pregnant'], 
-            elderly_keywords:list = default_keywords['elderly']) -> pd.DataFrame:
+def make_df(medicine_dictionary: dict, keywords: dict ) -> (pd.DataFrame, dict):
     """
     Description: Tags medicine guidelines and precautions based on topic and importance.
 
@@ -139,63 +124,65 @@ def make_df(medicine_dictionary: dict,
 
     :param medicine_dictionary: Guidelines and Precautions text data in a dictionary.
     :type medicine_dictonary: dict (required)
-    :param forbid_keywords: Keywords for forbidden action detection.
-    :type forbid_keywords: list (optional)
-    :param warning_keywords: Keywords for warned action detection.
-    :type warning_keywords: list (optional)
-    :param child_keywords: Keywords related to children.
-    :type child_keywords: list (optional)
-    :param pregnancy_keywords: Keywords related to pregnancy.
-    :type pregnancy_keywords: list (optional)
-    :param elderly_keywords: Keywords related to elderly.
-    :type elderly_keywords: list (optional)
+    :param forbid_keywords: Keywords
+    :type forbid_keywords: dict (required)
 
     :return df: Dataframe of guidelines and precautions text data, tagged section by section. 
         Columns:
             Section(str): Highest level headings
             Content(str): Actual Guidelines and Precautions text
             Section Importance(int): Tag of importance; (0: Forbidden action, 1: Warned action, 2: Useful information)
-            Topics(list[int]): Tag of topic; (1: children, 2: pregnancy, 3: elderly)
-    :type pandas.DataFrame
+            Topics(list[int]): Tag of topic;
+    :rtype df: pandas.DataFrame
+    :return topic_tag_int: Dictionary mapping topics to their topic tags
+    :rtype topic_tag_int: dict
 
     """
+    importance_keys = ["forbid", "warning"]
+    importance = {key: keywords[key] for key in importance_keys if key in keywords}
+    topics = {key: keywords[key] for key in keywords if key not in importance_keys}
     rows = []
     numbering_pattern = re.compile(r'^\d+[.)]\s*')
+    topic_tag_int = {}
+    for i, topic in enumerate(topics.keys()):
+        topic_tag_int[topic] = i    
 
     for section_title, content in medicine_dictionary.items():
         section_title_str = section_title if isinstance(section_title, str) else ""
         section_title_str = re.sub(numbering_pattern, '', section_title_str)
-        section_importance = tag_importance(section_title_str, forbid_keywords, warning_keywords)
+        section_importance = tag_importance(section_title_str,importance["forbid"], importance["warning"])
         topic_tags = []
-        topic_tags.append(tag_topic(section_title_str, child_keywords, 1))
-        topic_tags.append(tag_topic(section_title_str, pregnancy_keywords, 2))
-        topic_tags.append(tag_topic(section_title_str, elderly_keywords, 3))
+        
+        for topic, topic_list in topics.items():
+            tag = tag_topic(section_title_str, topic_list, topic_tag_int[topic])
+            if tag:
+                topic_tags.append(tag)
+
         if isinstance(content, list):
             for sub in content:
                 sub_topic_tags = []
                 sub = re.sub(numbering_pattern, '', sub)
-                if 1 not in topic_tags:
-                    sub_topic_tags.append(tag_topic(sub, child_keywords, 1))
-                if 2 not in topic_tags:
-                    sub_topic_tags.append(tag_topic(sub, pregnancy_keywords, 2))
-                if 3 not in topic_tags:
-                    sub_topic_tags.append(tag_topic(sub, elderly_keywords, 3))
-                sub_topic_tags = topic_tags.extend(sub_topic_tags)
+                for topic, topic_list in topics.items():
+                    if topic_tag_int[topic] not in topic_tags:
+                        tag = tag_topic(sub, topic_list, topic_tag_int[topic])
+                        if tag:
+                            sub_topic_tags.append(tag)
+                sub_topic_tags = topic_tags + sub_topic_tags
                 rows.append({'Section': section_title_str, 'Content': sub, 'Section Importance': section_importance, 'Topics': sub_topic_tags})
         elif isinstance(content, str):
             c_topic_tags = []
             content = re.sub(numbering_pattern, '', content)
-            if 1 not in topic_tags:
-                c_topic_tags.append(tag_topic(content, child_keywords, 1))
-            if 2 not in topic_tags:
-                c_topic_tags.append(tag_topic(content, pregnancy_keywords, 2))
-            if 3 not in topic_tags:
-                c_topic_tags.append(tag_topic(content, elderly_keywords, 3))
-            c_topic_tags = topic_tags.extend(c_topic_tags)
+            for topic, topic_list in topics.items():
+                if topic_tag_int[topic] not in topic_tags:
+                    tag = tag_topic(content, topic_list, topic_tag_int[topic])
+                    if tag:
+                        c_topic_tags.append(tag)
+            
+            c_topic_tags = topic_tags + c_topic_tags
             rows.append({'Section': section_title_str, 'Content': content, 'Section Importance': section_importance, 'Topics': c_topic_tags})
 
     df = pd.DataFrame(rows)
-    return df
+    return df, topic_tag_int
 
 
 
@@ -204,7 +191,12 @@ def main(args):
     current_path = Path(args.path) or Path(os.getcwd())
 
     with open(current_path / "keywords_ybigta.json", 'r', encoding='utf-8') as json_file:
-        keywords = json.load(json_file)
+        default_keywords = json.load(json_file)
+
+    med_dict = split_sections()
+    med_df, topic_to_tag = make_df(med_dict, default_keywords)
+
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
