@@ -185,6 +185,86 @@ def make_df(medicine_dictionary: dict, keywords: dict ) -> (pd.DataFrame, dict):
     return df, topic_tag_int
 
 
+disease_keywords = {
+    "고혈압": ["고혈압", "혈압"],
+    "저혈압": ["저혈압", "혈압"],
+    "당뇨": ["당뇨", "당뇨병", "혈당", "인슐린"],
+    "암": ["종양", "암", "방사선", "화학 요법"],
+    "고지혈증": ["고지혈증", "콜레스테롤", "지방", "혈중 지질"],
+    "갑상선": ["갑상선", "기능 항진증", "기능 저하증"],
+    "비만": ["비만", "체중", "과체중", "식이"],
+    "치매": ["치매", "알츠하이머", "뇌경색"],
+}
+def find_value_in_dict(search_value: str, search_dict:dict) -> (str, list):
+    for k, v in search_dict.items():
+        if search_value in v:
+            return (k, v)
+    return False
+
+def process_user_input(previous_meds: list, interest_disease: list) -> (dict, dict):
+    meds_dict = {}
+    disease_dict = {}
+    if previous_meds:
+        for prev_med in previous_meds:
+            meds_dict[prev_med] = [prev_med]
+    else:
+        meds_dict = {}
+    if interest_disease:
+        for disease in interest_disease:
+            find_value= find_value_in_dict(disease, disease_keywords)
+            if find_value:
+                disease_name, disease_kw = find_value
+                disease_dict[disease_name] = disease_kw
+            else:
+                disease_dict[disease] = [disease]
+    else:
+        disease_dict = {}
+    return meds_dict, disease_dict         
+    
+def additional_tagging(in_df: pd.DataFrame, meds_dict: dict, disease_dict:dict)-> pd.DataFrame:
+    meds_len = len(meds_dict)
+    if meds_dict:
+        meds_tag_int = {}
+        for i, med in enumerate(meds_dict.keys()):
+            meds_tag_int[med] = i + 5
+        meds_tags = []
+        for section, content in zip(in_df['Section'], in_df['Content']):
+            row_meds = []
+            for med, med_kw in meds_dict.items():
+                section_result = tag_topic(section, med_kw, meds_tag_int[med])
+                content_result = tag_topic(content, med_kw, meds_tag_int[med])
+                if section_result:
+                    row_meds.append(section_result)
+                if content_result:
+                    row_meds.append(content_result)
+            meds_tags.append(row_meds)
+        in_df["Past Medicine"] = meds_tags
+    else:
+        meds_tag_int = {}
+    if disease_dict:
+        disease_tag_int = {}
+        for i, disease in enumerate(disease_dict.keys()):
+            disease_tag_int[disease] = i + 5 + meds_len
+        disease_tags = []
+        for section, content in zip(in_df['Section'], in_df['Content']):
+            row_disease = []
+            for disease, disease_kw in disease_dict.items():
+                section_result = tag_topic(section, disease_kw, disease_tag_int[disease])
+                content_result = tag_topic(content, disease_kw, disease_tag_int[disease])
+                if section_result:
+                    row_disease.append(section_result)
+                if content_result:
+                    row_disease.append(content_result)
+            disease_tags.append(row_disease)
+        in_df["Disease Interest"] = disease_tags
+    else:
+        disease_tag_int = {}
+    result_tag_int = {}
+    result_tag_int["medicine"] = meds_tag_int
+    result_tag_int["disease"] = disease_tag_int
+    return in_df, result_tag_int
+
+
 
 def main(args):
     # Use the provided path or set the default to the current working directory
